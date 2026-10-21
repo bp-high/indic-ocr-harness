@@ -3,51 +3,14 @@
 The package is built with setuptools from `pyproject.toml`. It uses the src layout, and the version lives in
 `src/indic_ocr_harness/_version.py`.
 
-`.github/workflows/release.yml` publishes it to PyPI with
-[trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
-`tools/release.py` keeps the version and the changelog consistent.
+`.github/workflows/release.yml` publishes releases, and `tools/release.py` keeps the version and the changelog
+consistent.
 
-## One-time setup
-
-1. **Name.**
-   - Check that `indic-ocr-harness` is free on [PyPI](https://pypi.org/project/indic-ocr-harness/) and
-     [TestPyPI](https://test.pypi.org/project/indic-ocr-harness/).
-   - To rename, change `name` in `pyproject.toml`, the package directory `src/indic_ocr_harness`, the script entry,
-     the project URLs and the imports in tests and docs.
-   - Don't use "Bodhan" in the name: the Bodhan license (§8.4) grants no trademark use beyond the attribution notice.
-2. **Trusted publishers.** On [pypi.org](https://pypi.org/manage/account/publishing/) and
-   [test.pypi.org](https://test.pypi.org/manage/account/publishing/), add a "pending publisher" with:
-
-   | Field | PyPI | TestPyPI |
-   |---|---|---|
-   | PyPI project name | `indic-ocr-harness` | `indic-ocr-harness` |
-   | Owner | `bp-high` | `bp-high` |
-   | Repository name | `indic-ocr-harness` | `indic-ocr-harness` |
-   | Workflow name | `release.yml` | `release.yml` |
-   | Environment name | `pypi` | `testpypi` |
-
-3. **GitHub environments.** Under Settings → Environments, create `testpypi` and `pypi`.
-   - On `pypi`, add yourself as a required reviewer. Every real release then waits for your approval after the
-     TestPyPI install test.
-   - On both, limit deployments to protected branches and tags. Add the tag rule `v*`.
-4. **Tag protection (recommended).** Under Settings → Rules → New tag ruleset, target `v*` and restrict creation
-   and deletion to admins.
-5. **Test the pipeline.** Run it once manually; this publishes nothing real (see below).
-
-If the repository moves (for example to an organisation), update the owner in both trusted publishers and the URLs
-in `pyproject.toml` and `README.md`.
-
-## Test run: a dev build to TestPyPI
-
-Go to Actions → Release → Run workflow, on `main`. The workflow:
-
-1. runs CI;
-2. builds `X.Y.Z.dev<run number>`;
-3. install-tests the wheel;
-4. publishes it to TestPyPI;
-5. installs it back from TestPyPI and checks it is byte-identical to the build.
-
-It never touches PyPI or GitHub releases. Use it after the one-time setup, and whenever you change the workflow.
+- **GitHub releases work now.** A `vX.Y.Z` tag publishes a GitHub release with the wheel, the sdist, `SHA256SUMS`
+  and the changelog section as notes.
+- **PyPI is opt-in.** After the one-time setup below, set the repository variable `PUBLISH_TO_PYPI` to `true`. The
+  same tag then also publishes to TestPyPI and PyPI, using
+  [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
 
 ## Releasing X.Y.Z
 
@@ -79,31 +42,85 @@ It never touches PyPI or GitHub releases. Use it after the one-time setup, and w
    2. checks the tag: it must equal `v` + `__version__`, sit on `main`, and have a dated changelog section;
    3. builds the sdist and wheel reproducibly (file times from the commit) and runs `twine check`;
    4. installs the wheel in a clean environment and runs the CLI;
-   5. on a public repository, attests build provenance;
-   6. publishes to TestPyPI, then installs the package back from there and compares it with the build;
-   7. waits for approval on the `pypi` environment, then publishes to PyPI;
-   8. creates the GitHub release `vX.Y.Z`, with the changelog section as notes and the files attached.
-6. **Smoke-test from PyPI:**
+   5. on a public repository, attests build provenance (`gh attestation verify <file> -R bp-high/indic-ocr-harness`);
+   6. with `PUBLISH_TO_PYPI=true` only:
+      1. publishes to TestPyPI;
+      2. installs the package back from there and compares it with the build;
+      3. waits for approval on the `pypi` environment;
+      4. publishes to PyPI;
+   7. creates the GitHub release `vX.Y.Z`: the changelog section and install instructions as notes, with the wheel,
+      the sdist and `SHA256SUMS` attached.
+6. **Smoke-test the release:**
 
    ```bash
    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-   pip install indic-ocr-harness==X.Y.Z
+   pip install https://github.com/bp-high/indic-ocr-harness/releases/download/vX.Y.Z/indic_ocr_harness-X.Y.Z-py3-none-any.whl
+   # or, once on PyPI: pip install indic-ocr-harness==X.Y.Z
    indic-ocr-harness --version
    ```
 
+   Release assets of a private repository need a GitHub login. To download them, use
+   `gh release download vX.Y.Z -R bp-high/indic-ocr-harness`.
+
+## Test run
+
+Go to Actions → Release → Run workflow, on `main`.
+- **Always:** the run does CI, builds `X.Y.Z.dev<run number>` and install-tests the wheel.
+- **With `PUBLISH_TO_PYPI=true`:** it also publishes that dev build to TestPyPI, installs it back and checks it is
+  byte-identical to the build.
+
+A manual run never publishes to PyPI or creates a GitHub release. Run one after the PyPI setup, and whenever you
+change the workflow.
+
+## Turning on PyPI (one-time setup)
+
+1. **Name.**
+   - Check that `indic-ocr-harness` is free on [PyPI](https://pypi.org/project/indic-ocr-harness/) and
+     [TestPyPI](https://test.pypi.org/project/indic-ocr-harness/).
+   - To rename, change `name` in `pyproject.toml`, the package directory `src/indic_ocr_harness`, the script entry,
+     the project URLs and the imports in tests and docs.
+   - Don't use "Bodhan" in the name: the Bodhan license (§8.4) grants no trademark use beyond the attribution notice.
+2. **Trusted publishers.** On [pypi.org](https://pypi.org/manage/account/publishing/) and
+   [test.pypi.org](https://test.pypi.org/manage/account/publishing/), add a "pending publisher" with:
+
+   | Field | PyPI | TestPyPI |
+   |---|---|---|
+   | PyPI project name | `indic-ocr-harness` | `indic-ocr-harness` |
+   | Owner | `bp-high` | `bp-high` |
+   | Repository name | `indic-ocr-harness` | `indic-ocr-harness` |
+   | Workflow name | `release.yml` | `release.yml` |
+   | Environment name | `pypi` | `testpypi` |
+
+3. **GitHub environments.** Under Settings → Environments, create `testpypi` and `pypi`.
+   - On `pypi`, add yourself as a required reviewer. Every PyPI release then waits for your approval after the
+     TestPyPI install test.
+   - On both, limit deployments to protected branches and tags, and add the tag rule `v*`.
+4. **Switch it on.** Under Settings → Secrets and variables → Actions → Variables, add `PUBLISH_TO_PYPI` = `true`.
+5. **Test it.** Do a manual test run (above).
+
+**Recommended:** protect release tags. Under Settings → Rules → New tag ruleset, target `v*` and restrict creation and
+deletion to admins.
+
+If the repository moves (for example to an organisation), update the owner in both trusted publishers and the URLs
+in `pyproject.toml` and `README.md`.
+
 ## When something fails
 
-- **Before PyPI** (CI, the tag checks, build, TestPyPI): nothing is released.
-  - Fix the problem on `main`.
-  - Move the tag: `git tag -d vX.Y.Z && git push origin :vX.Y.Z`, then tag again.
-  - If the release was already uploaded to TestPyPI, bump the patch version instead, because TestPyPI never
-    accepts the same file name twice.
+- **Before anything is published** (CI, the tag checks, build): fix the problem on `main` and move the tag.
+
+  ```bash
+  git tag -d vX.Y.Z && git push origin :vX.Y.Z
+  ```
+
+  Then tag again. If the version was already uploaded to TestPyPI, bump the patch version instead, because TestPyPI
+  never accepts the same file name twice.
 - **After PyPI** (the GitHub release job): use "Re-run failed jobs". Uploads use `skip-existing`, so a re-run never
   uploads twice.
 - **`invalid-publisher` from PyPI or TestPyPI:** the trusted publisher does not match. Check the owner, repository,
   workflow file name and environment name against the table above.
-- **A broken release:** don't delete it from PyPI. Yank it on pypi.org (Manage → Release → Options → Yank) and
-  release a fixed patch version.
+- **A broken release:**
+  - On PyPI, don't delete it. Yank it (Manage → Release → Options → Yank) and release a fixed patch version.
+  - On GitHub, mark the release as a pre-release or edit its notes, then release the fix.
 
 ## Versioning
 

@@ -28,8 +28,13 @@ Requires Python ≥ 3.11. Install torch first, for your hardware. The CPU wheels
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip install indic-ocr-harness
+# from a GitHub release (see Releases for the latest version)
+pip install https://github.com/bp-high/indic-ocr-harness/releases/download/v0.1.0/indic_ocr_harness-0.1.0-py3-none-any.whl
+# or from the repository
+pip install "git+https://github.com/bp-high/indic-ocr-harness@main"
 ```
+
+PyPI releases (`pip install indic-ocr-harness`) are planned.
 
 `transformers` is pinned to 5.7.0. Version 5.19 and later swap the recognizer's tokenizer for one that garbles Indic
 text. The harness checks this when it loads the model and refuses to run with the wrong tokenizer.
