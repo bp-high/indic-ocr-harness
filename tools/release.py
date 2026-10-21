@@ -43,7 +43,7 @@ def write_version(version: str, root: Path = ROOT) -> None:
 
 
 def _heading(version: str) -> re.Pattern[str]:
-    return re.compile(rf"^## {re.escape(version)} \((unreleased|\d{{4}}-\d{{2}}-\d{{2}})\)\s*$", re.M)
+    return re.compile(rf"^## {re.escape(version)} \((unreleased|\d{{4}}-\d{{2}}-\d{{2}})\)[ \t]*$", re.M)
 
 
 def release_date(version: str, root: Path = ROOT) -> str | None:

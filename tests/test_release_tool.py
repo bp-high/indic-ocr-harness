@@ -46,6 +46,7 @@ def test_prepare_dates_the_section_and_sets_the_version(repo):
     release.prepare("0.2.0", today=datetime.date(2026, 11, 2), root=repo)
     assert release.read_version(repo) == "0.2.0"
     assert release.release_date("0.2.0", repo) == "2026-11-02"
+    assert "## 0.2.0 (2026-11-02)\n\n- New thing." in (repo / "CHANGELOG.md").read_text()  # layout kept
     with pytest.raises(release.ReleaseError, match="add a"):
         release.prepare("0.3.0", root=repo)
     with pytest.raises(release.ReleaseError, match=r"X\.Y\.Z"):
