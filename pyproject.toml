@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "indic-ocr-harness"
+dynamic = ["version"]
+description = "Training-free OCR harness around the open-weights Bodhan indic-ocr model: zoom, seam strips, verified re-reads, votes."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "bp-high" }]
+keywords = ["ocr", "indic", "handwriting", "devanagari", "document-ai", "bodhan"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: Hindi",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Typing :: Typed",
+]
+# The model-free core (text rules, image ops, config) needs only numpy, OpenCV, Pillow and rapidfuzz. torch,
+# transformers and friends are needed to run the two Bodhan models and are pinned to what the model was validated on.
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.0.1",
+    "opencv-python-headless>=4.8",
+    "rapidfuzz>=3.0",
+    "huggingface_hub>=1.0",
+    "torch>=2.4",
+    "torchvision>=0.19",
+    # transformers 5.19+ swaps the recognizer's Sarvam tokenizer for one that mis-encodes it (checked at load time).
+    "transformers==5.7.0",
+    "accelerate>=1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "build>=1.2", "twine>=5"]
+
+[project.scripts]
+indic-ocr-harness = "indic_ocr_harness.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/bp-high/indic-ocr-harness"
+Repository = "https://github.com/bp-high/indic-ocr-harness"
+Issues = "https://github.com/bp-high/indic-ocr-harness/issues"
+Changelog = "https://github.com/bp-high/indic-ocr-harness/blob/main/CHANGELOG.md"
+Model = "https://huggingface.co/bodhan-ai/indic-ocr"
+
+[tool.setuptools.dynamic]
+version = { attr = "indic_ocr_harness._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+indic_ocr_harness = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["model: needs the Bodhan snapshot (set INDIC_OCR_HARNESS_MODEL)"]
+
+[tool.ruff]
+line-length = 128
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # Devanagari and other Unicode in strings, docstrings and comments is intended
+    "SIM108",                      # if/else blocks kept where a ternary would hide a decision
+    "B023",                        # closures in the page pipeline bind loop variables deliberately
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]

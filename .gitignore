@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv*/
+venv*/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# never commit model files, page images, caches or outputs
+*.safetensors
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+reads.json
+outputs.json
+.env

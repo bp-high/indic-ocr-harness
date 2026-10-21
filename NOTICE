@@ -1,0 +1,14 @@
+indic-ocr-harness
+Copyright 2026 bp-high
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Built with IndicOCR from Bodhan AI / AI4Bharat.
+
+This package runs the open-weights Bodhan "indic-ocr" model (IndicDocLayout and IndicBlockOCR), which it downloads
+from https://huggingface.co/bodhan-ai/indic-ocr together with the model's own inference code. The model weights,
+tokenizer, configuration and inference code are NOT part of this package and are licensed separately under the
+Bodhan AI Open Model License (Bodhan AI, Center of Excellence for Artificial Intelligence in Education, IIT Madras).
+Making the model or a derivative available to third parties requires the attribution notice above, and hosting it as
+a service for third parties requires Bodhan AI's prior written approval unless an exemption in that license applies.
+No endorsement by Bodhan AI, AI4Bharat or IIT Madras is implied.
