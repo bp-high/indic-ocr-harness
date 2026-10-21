@@ -1,18 +1,25 @@
 name: Release
 
 # See PUBLISHING.md.
-# - Push a tag vX.Y.Z (on main, matching _version.py, with a dated CHANGELOG section): CI, check the tag, build and
-#   install-test the wheel, then a GitHub release with the wheel, the sdist, SHA256SUMS and the changelog section.
-# - PyPI is opt-in: set the repository variable PUBLISH_TO_PYPI=true after the one-time trusted-publisher setup. A tag
-#   then also publishes to TestPyPI, installs it back, and publishes to PyPI (after the `pypi` environment gate)
-#   before the GitHub release.
-# - Run it manually (Actions -> Release -> Run workflow) to test the pipeline: CI and a X.Y.Z.dev<run> build, plus
-#   the TestPyPI steps when PyPI is on. A manual run never publishes a release.
+# - Release by pushing a tag vX.Y.Z, or by running this workflow on main with "release" ticked (it creates the tag).
+#   The version comes from _version.py and needs a dated CHANGELOG section. The run: CI, version checks, a
+#   reproducible build, an install test, then a GitHub release with the wheel, the sdist, SHA256SUMS and the
+#   changelog section.
+# - PyPI is opt-in: set the repository variable PUBLISH_TO_PYPI=true after the one-time trusted-publisher setup. A
+#   release then also publishes to TestPyPI, installs it back, and publishes to PyPI (after the `pypi` environment
+#   gate) before the GitHub release.
+# - A manual run without "release" tests the pipeline: CI and a X.Y.Z.dev<run> build, plus the TestPyPI steps when
+#   PyPI is on. It never publishes a release.
 # Publishing uses PyPI trusted publishing (OIDC): no token is stored anywhere.
 on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release of the version in _version.py (creates tag vX.Y.Z on main)"
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,6 +41,8 @@ jobs:
       attestations: write
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,10 +52,25 @@ jobs:
           python-version: "3.13"
       - name: Resolve and check the version
         id: version
-        run: python tools/release.py ci-version --ref "$GITHUB_REF" --run-number "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
-      - name: The tagged commit must be on main
-        if: startsWith(github.ref, 'refs/tags/')
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+        env:
+          RELEASE_INPUT: ${{ inputs.release }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$RELEASE_INPUT" = true ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::releases are made from main"; exit 1; }
+            tag="v$(python tools/release.py version)"
+            if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then echo "::error::$tag already exists"; exit 1; fi
+            python tools/release.py ci-version --ref "refs/tags/$tag" --run-number "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            python tools/release.py ci-version --ref "$GITHUB_REF" --run-number "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"; echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            python tools/release.py ci-version --ref "$GITHUB_REF" --run-number "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: A release commit must be on main
+        if: steps.version.outputs.release == 'true'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
       - run: pip install build twine
       - name: Build (reproducible; file times from the commit)
         run: SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m build
@@ -117,7 +141,7 @@ jobs:
           /tmp/pub/bin/indic-ocr-harness --version | grep -F "$VERSION"
 
   pypi:
-    if: vars.PUBLISH_TO_PYPI == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: vars.PUBLISH_TO_PYPI == 'true' && needs.build.outputs.release == 'true'
     needs: [build, verify-testpypi]
     runs-on: ubuntu-latest
     environment:
@@ -137,8 +161,8 @@ jobs:
   github-release:
     # after PyPI when that is on; on its own when it is off (pypi skipped)
     if: >-
-      always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-      && needs.build.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.pypi.result)
+      always() && needs.build.result == 'success' && needs.build.outputs.release == 'true'
+      && contains(fromJSON('["success", "skipped"]'), needs.pypi.result)
     needs: [build, pypi]
     runs-on: ubuntu-latest
     permissions:
@@ -153,6 +177,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
         run: |
           python3 tools/release.py notes "$VERSION" > notes.md
           wheel=$(cd dist && ls *.whl)
@@ -162,8 +187,10 @@ jobs:
 
           \`\`\`bash
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$wheel
+          pip install https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$wheel
           \`\`\`
           EOF
           (cd dist && sha256sum * > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "indic-ocr-harness $VERSION" --notes-file notes.md
+          # a pushed tag must exist; a manual release creates the tag on the commit that was built
+          if [ "$GITHUB_EVENT_NAME" = push ]; then where=--verify-tag; else where="--target=$GITHUB_SHA"; fi
+          gh release create "$TAG" dist/* "$where" --title "indic-ocr-harness $VERSION" --notes-file notes.md

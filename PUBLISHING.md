@@ -6,8 +6,8 @@ The package is built with setuptools from `pyproject.toml`. It uses the src layo
 `.github/workflows/release.yml` publishes releases, and `tools/release.py` keeps the version and the changelog
 consistent.
 
-- **GitHub releases work now.** A `vX.Y.Z` tag publishes a GitHub release with the wheel, the sdist, `SHA256SUMS`
-  and the changelog section as notes.
+- **GitHub releases work now.** A `vX.Y.Z` tag, or the Release workflow run with "release" ticked, publishes a GitHub
+  release with the wheel, the sdist, `SHA256SUMS` and the changelog section as notes.
 - **PyPI is opt-in.** After the one-time setup below, set the repository variable `PUBLISH_TO_PYPI` to `true`. The
   same tag then also publishes to TestPyPI and PyPI, using
   [trusted publishing](https://docs.pypi.org/trusted-publishers/), so no API token is stored anywhere.
@@ -29,17 +29,23 @@ consistent.
    INDIC_OCR_HARNESS_MODEL=/path/to/bodhan-snapshot pytest -m model   # needs the Bodhan snapshot
    ```
 
-4. **Commit, tag and push.** Put the tag on a commit that is on `main`:
+4. **Commit, push and release.** Either:
+   - **Push a tag.** Put it on a commit that is on `main`:
 
-   ```bash
-   git commit -am "release: X.Y.Z"
-   git tag -a vX.Y.Z -m "indic-ocr-harness X.Y.Z"
-   git push origin main vX.Y.Z
-   ```
+     ```bash
+     git commit -am "release: X.Y.Z"
+     git tag -a vX.Y.Z -m "indic-ocr-harness X.Y.Z"
+     git push origin main vX.Y.Z
+     ```
 
-5. **The tag starts `release.yml`.** It:
+   - **Use the Release button.** Commit and push to `main`, then go to Actions → Release → Run workflow on `main`
+     and tick "release". The workflow creates the tag `vX.Y.Z` on the commit it built. It refuses if the tag already
+     exists or the run is not on `main`.
+
+5. **`release.yml` then:**
    1. runs CI (lint, tests on Python 3.11–3.13, the package-contents check);
-   2. checks the tag: it must equal `v` + `__version__`, sit on `main`, and have a dated changelog section;
+   2. checks the version: the tag must equal `v` + `__version__`, the commit must be on `main`, and the changelog
+      must have a dated section for it;
    3. builds the sdist and wheel reproducibly (file times from the commit) and runs `twine check`;
    4. installs the wheel in a clean environment and runs the CLI;
    5. on a public repository, attests build provenance (`gh attestation verify <file> -R bp-high/indic-ocr-harness`);
@@ -64,7 +70,7 @@ consistent.
 
 ## Test run
 
-Go to Actions → Release → Run workflow, on `main`.
+Go to Actions → Release → Run workflow, on `main`, with "release" not ticked.
 - **Always:** the run does CI, builds `X.Y.Z.dev<run number>` and install-tests the wheel.
 - **With `PUBLISH_TO_PYPI=true`:** it also publishes that dev build to TestPyPI, installs it back and checks it is
   byte-identical to the build.
