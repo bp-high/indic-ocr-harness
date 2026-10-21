@@ -1,10 +1,19 @@
 name: Release
 
-# Push a tag vX.Y.Z whose version equals src/indic_ocr_harness/_version.py. Publishing uses PyPI trusted publishing
-# (OIDC): no token is stored. See PUBLISHING.md for the one-time setup.
+# Two ways in (see PUBLISHING.md):
+# - push a tag vX.Y.Z (on main, matching _version.py, with a dated CHANGELOG section): CI, build, publish to
+#   TestPyPI, install-test the published files, publish to PyPI after the `pypi` environment gate, GitHub release;
+# - run it manually (Actions -> Release -> Run workflow): the same up to TestPyPI, with the version X.Y.Z.dev<run>,
+#   to test the pipeline without releasing anything.
+# Publishing uses PyPI trusted publishing (OIDC): no token is stored anywhere.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -16,27 +25,53 @@ jobs:
   build:
     needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # build provenance attestation
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Resolve and check the version
+        id: version
+        run: python tools/release.py ci-version --ref "$GITHUB_REF" --run-number "$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+      - name: The tagged commit must be on main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
       - run: pip install build twine
-      - name: Tag must match the package version
-        run: |
-          v=$(python -c "import re; print(re.search(r'\"(.+)\"', open('src/indic_ocr_harness/_version.py').read())[1])")
-          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != version $v"; exit 1; }
-      - run: python -m build
+      - name: Build (reproducible; file times from the commit)
+        run: SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m build
       - run: twine check --strict dist/*
+      - name: Install-test the wheel in a clean environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          /tmp/smoke/bin/pip install -q dist/*.whl
+          /tmp/smoke/bin/indic-ocr-harness --version | grep -F "${{ steps.version.outputs.version }}"
+          /tmp/smoke/bin/indic-ocr-harness show-config > /dev/null
+      - name: Build provenance attestation
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
   testpypi:
     needs: build
     runs-on: ubuntu-latest
-    environment: testpypi
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/indic-ocr-harness/${{ needs.build.outputs.version }}/
     permissions:
       id-token: write
     steps:
@@ -47,11 +82,42 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  verify-testpypi:
+    needs: [build, testpypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the published wheel and check it is the one built
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python -m venv /tmp/pub
+          /tmp/pub/bin/pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          # only the package itself comes from TestPyPI; its dependencies come from PyPI (no dependency confusion)
+          for i in 1 2 3 4 5 6 7 8; do
+            /tmp/pub/bin/pip download -q --no-deps --only-binary :all: --index-url https://test.pypi.org/simple/ \
+              -d /tmp/wheel "indic-ocr-harness==$VERSION" && break
+            echo "not on TestPyPI yet, retrying in 30 s"; sleep 30
+          done
+          cmp /tmp/wheel/*.whl dist/*.whl
+          /tmp/pub/bin/pip install -q /tmp/wheel/*.whl
+          /tmp/pub/bin/indic-ocr-harness --version | grep -F "$VERSION"
 
   pypi:
-    needs: testpypi
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify-testpypi]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/indic-ocr-harness/${{ needs.build.outputs.version }}/
     permissions:
       id-token: write
     steps:
@@ -60,9 +126,12 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   github-release:
-    needs: pypi
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, pypi]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -72,6 +141,10 @@ jobs:
         with:
           name: dist
           path: dist/
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md."
+      - name: Create the GitHub release with the CHANGELOG section as notes
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 tools/release.py notes "$VERSION" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "indic-ocr-harness $VERSION" --notes-file notes.md
