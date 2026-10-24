@@ -38,7 +38,16 @@ from ..text.dates import dates_in, harvest_filter
 from ..text.degeneracy import degenerate, strip_degenerate_lines
 from ..text.latex import LATEX_RE, latex_spans, latex_to_plain, suspect_latex
 from ..text.loops import cut_macro_repeat
-from ..text.scripts import DEVA_DIGIT, count_numbers, foreign_letters, minority_digits, to_script
+from ..text.scripts import (
+    DEVA_DIGIT,
+    count_numbers,
+    foreign_letters,
+    map_script,
+    map_script_spans,
+    minority_digits,
+    script_reread_plausible,
+    to_script,
+)
 from ..text.tables import TR, contained_in, drop_repeated_rows
 from .flags import page_flags
 from .records import block_lp, final_reads, mean_lp, piece
@@ -139,7 +148,8 @@ class PageRun:
         The crop is re-read once with those tokens banned, and only the flagged spans of the first read are replaced
         by the aligned parts of the re-read. For a script fix, the recognizer itself chooses between the 1:1 offset
         mapping and the spliced re-read (teacher-forced log-prob). The re-read is dropped if it hit the cap, diverged
-        (normalised edit distance > 0.5) or is degenerate.
+        (normalised edit distance > 0.5) or is degenerate. With ``script_reread_gate`` a diverged script re-read is
+        kept if it is plausible on length and Latin letters (a line written as words of another language).
         """
         cfg = self.cfg
         lat_spans = [sp for sp in latex_spans(text) if suspect_latex(text[sp[0] : sp[1]])] if cfg.latex_ban else []
@@ -154,11 +164,11 @@ class PageRun:
         r2 = self.reader.read([(img, prompt)], max_new=[bud], ban=ban)[0]
         rec: Trace = {"repair": ban, "reread": piece(r2, a), "first_read": first}
         base = to_script(text, cfg.script) if scr else text  # 1:1 letter mapping: same length and positions
-        if (
-            r2["hit"]
-            or Levenshtein.normalized_distance(base, r2["text"]) > 0.5
-            or (cfg.degeneracy_check and degenerate(r2["text"], kind))
-        ):
+        diverged = Levenshtein.normalized_distance(base, r2["text"]) > 0.5
+        if diverged and scr and cfg.script_reread_gate and script_reread_plausible(text, r2["text"]):
+            diverged = False
+            rec["plausible_gate"] = True
+        if r2["hit"] or diverged or (cfg.degeneracy_check and degenerate(r2["text"], kind)):
             return text, dict(rec, accepted=False, why="re-read hit the cap or diverged")
 
         def is_minority_digit(w: str) -> bool:
@@ -166,11 +176,16 @@ class PageRun:
 
         other = lat_spans + (word_spans(text, is_minority_digit) if dig else [])
         script_spans = word_spans(text, lambda w: foreign_letters(w, cfg.script)[0] > 0) if scr else []
+        tsc = to_script
+        if scr and cfg.script_map_fixed:  # the fixed letter map; the spans move with the mapped text
+            tsc = map_script
+            base, moved = map_script_spans(text, other + script_spans, cfg.script)
+            other, script_spans = moved[: len(other)], moved[len(other) :]
         new = splice(base, r2["text"], merge_spans(other + script_spans))
         rec.update(accepted=True)
         if scr:
             mapped = splice(base, r2["text"], merge_spans(other)) if other else base
-            cands = [to_script(mapped, cfg.script), to_script(new, cfg.script)]
+            cands = [tsc(mapped, cfg.script), tsc(new, cfg.script)]
             if cands[0] != cands[1]:
                 try:
                     sc: list[float] | None = [x[0] for x in self.reader.score(img, prompt, cands)]
@@ -491,7 +506,7 @@ class PageRun:
             if b.text and cfg.dedupe and b.type != "Table":
                 b.text = cut_macro_repeat(b.text)
             if b.text and cfg.script:
-                b.text = to_script(b.text, cfg.script)
+                b.text = (map_script if cfg.script_map_fixed else to_script)(b.text, cfg.script)
             if b.text and cfg.latex_plain:
                 b.text = latex_to_plain(b.text)
         md = rt.reconstruct(blocks)

@@ -16,7 +16,10 @@ from indic_ocr_harness.text import (
     latex_to_plain,
     loop_tail,
     looped,
+    map_script,
+    map_script_spans,
     minority_digits,
+    script_reread_plausible,
     splice,
     strip_degenerate_lines,
     suspect_latex,
@@ -57,6 +60,38 @@ def test_to_script():
     assert to_script("বাজার", "deva") == "बाजार"
     assert to_script("बाजार", "beng") == "বাজার"
     assert len(to_script("ગામ ਪਿੰਡ ଗାଁ")) == len("ગામ ਪਿੰਡ ଗାଁ")
+
+
+def test_map_script_fixes_non_parallel_code_points():
+    assert map_script("সময়") == map_script("সময়") == map_script("ସମୟ") == "समय"  # yya, precomposed or ya + nukta
+    assert to_script("সময়") == "समय़"  # the 1:1 map writes य़, which Hindi does not use
+    assert map_script("উৎপাদন") == "उत्पादन" and to_script("উৎপাদন") == "उॎपादन"  # khanda ta
+    assert map_script("ৱাৰ্ড") == map_script("ୱାର୍ଡ") == "वार्ड"
+    assert map_script("ਪੱਕਾ ਪੰਜ") == "पक्का पंज"  # addak doubles the consonant; tippi is the anusvara
+    assert map_script("ੲਿਸ ੳੁਹ") == "इस उह"
+    assert map_script("ক\u09c7\u09be ক\u09c7\u09d7") == "को कौ"  # two-part vowel signs composed first
+    assert map_script("মোট ৳১০") == "मोट ৳१०"  # a currency sign has no Devanagari counterpart: kept
+    assert map_script("ગામ પંચાયત") == to_script("ગામ પંચાયત") == "गाम पंचायत"
+    assert map_script("बाजार", "beng") == "বাজার"
+
+
+def test_map_script_leaves_target_text_alone():
+    t = "क\u093c केवल हिन्दी, 12"  # no letters of another script: returned as is (not even NFC-normalised)
+    assert map_script(t) is t
+
+
+def test_map_script_spans():
+    t = "गाम પંચાયત $x$ ভারত সময়"
+    out, spans = map_script_spans(t, [(4, 10), (11, 14), (15, 24)])
+    assert out == "गाम पंचायत $x$ भारत समय"
+    assert [out[a:b] for a, b in spans] == ["पंचायत", "$x$", "भारत समय"]
+
+
+def test_script_reread_plausible():
+    assert script_reread_plausible("আজ সভায় সবাই ছিল", "आज बैठक में सभी थे")
+    assert not script_reread_plausible("আজ সভায়", "Please see the attached list")  # escaped into English
+    assert not script_reread_plausible("আজ সভায় সবাই এসেছিল", "आज")  # far too short
+    assert not script_reread_plausible("আজ", "आज बैठक में सभी उपस्थित थे")  # far too long
 
 
 def test_ban_chars():

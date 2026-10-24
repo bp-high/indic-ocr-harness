@@ -64,6 +64,9 @@ class HarnessConfig:
     script: str | None = "deva"
     """Expected script of the page (``deva``, ``beng``, ``guru``, ``gujr``, ``orya``); letters of the other
     ISCII-parallel scripts are mapped onto it. None: no script handling."""
+    script_map_fixed: bool = True
+    """Map the few code points that are not the same letter 0x80 apart by hand (Bengali য় is य, ৎ is त्, ...) and
+    compose two-part vowel signs first (``map_script``). False: the plain 1:1 offset map (``to_script``)."""
 
     # reading a block
     token_budget: bool = True
@@ -91,6 +94,10 @@ class HarnessConfig:
     latex_ban: bool = True
     script_ban: bool = True
     digit_ban: bool = True
+    script_reread_gate: bool = True
+    """Also keep a script re-read that differs from the mapped first read by more than half, if its length and Latin
+    letters are plausible (``script_reread_plausible``): a line written as words of another language. The
+    recognizer still chooses between it and the letter map."""
 
     vote: VoteConfig | None = field(default_factory=VoteConfig)
 
@@ -133,6 +140,7 @@ class HarnessConfig:
 PLAIN = HarnessConfig(
     harness=False,
     script=None,
+    script_map_fixed=False,
     token_budget=False,
     guard=False,
     degeneracy_check=False,
@@ -146,6 +154,7 @@ PLAIN = HarnessConfig(
     latex_ban=False,
     script_ban=False,
     digit_ban=False,
+    script_reread_gate=False,
     vote=None,
     dedupe=False,
     latex_plain=False,

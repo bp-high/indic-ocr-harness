@@ -7,12 +7,13 @@ import pytest
 from indic_ocr_harness.config import PLAIN, HarnessConfig, VoteConfig, ZoomConfig
 
 DEFAULT = {
-    "harness": True, "script": "deva", "token_budget": True, "guard": True, "degeneracy_check": True,
+    "harness": True, "script": "deva", "script_map_fixed": True,
+    "token_budget": True, "guard": True, "degeneracy_check": True,
     "zoom": {"min_line": 32, "max_zoom": 2.0, "min_change": 1.2, "floor": True, "verify_margin": 0.1,
              "verify_len": None, "latex_ok": True},
     "strip_max_aspect": 8.0, "header_band": True, "split_verify": True,
     "table_text": True, "table_text_gated": True, "table_dup_aksharas": True,
-    "latex_ban": True, "script_ban": True, "digit_ban": True,
+    "latex_ban": True, "script_ban": True, "digit_ban": True, "script_reread_gate": True,
     "vote": {"max_lp": -0.3, "pad": 24, "shift": 8, "max_blocks": 4},
     "dedupe": True, "latex_plain": True, "harvest_dates": True, "harvest_year_window": False,
     "flags": True, "flags_cell_counts": True,

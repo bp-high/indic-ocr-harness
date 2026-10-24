@@ -98,6 +98,34 @@ def test_repair_splices_only_flagged_spans():
     assert any(b == "latex" for _, _, b in rec.calls)
 
 
+def test_script_reread_kept_when_a_line_is_in_another_language():
+    # A Hindi line read as Bengali words: the letter map gives no Hindi, and the right re-read differs from it by
+    # more than half. The re-read is kept if it is plausible; the recognizer prefers it over the letter map.
+    first, reread = "আজ সভায় সবাই এসেছিল", "आज बैठक में सभी उपस्थित थे"
+
+    def answer(prompt, size, ban):
+        return reread if ban == "script:deva" else first
+
+    h, rec = make(answer)
+    rec.score = lambda img, prompt, texts: [(-2.0, []), (-0.4, [])]
+    page = h.read(np.full((H, W, 3), 255, np.uint8), layout=layout([TEXT_BLOCK]))
+    assert page.text == reread
+    h, rec = make(answer, HarnessConfig(script_reread_gate=False, script_map_fixed=False))
+    rec.score = lambda img, prompt, texts: [(-2.0, []), (-0.4, [])]
+    page = h.read(np.full((H, W, 3), 255, np.uint8), layout=layout([TEXT_BLOCK]))
+    assert page.text == "आज सभाय़ सबाइ एसेछिल"  # 0.1.0: the diverged re-read was dropped, the 1:1 map kept
+
+
+def test_script_reread_escaping_into_english_is_dropped():
+    def answer(prompt, size, ban):
+        return "Please see the attached list" if ban == "script:deva" else "আজ সভায় সবাই এসেছিল"
+
+    h, rec = make(answer)
+    rec.score = lambda img, prompt, texts: [(-2.0, []), (-0.4, [])]
+    page = h.read(np.full((H, W, 3), 255, np.uint8), layout=layout([TEXT_BLOCK]))
+    assert page.text == "आज सभाय सबाइ एसेछिल"  # the letter map, with Bengali য় as य
+
+
 def test_layout_must_match_the_image():
     h, _ = make(lambda p, s, b: "x")
     with pytest.raises(ValueError, match="layout is for"):
