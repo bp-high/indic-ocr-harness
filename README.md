@@ -71,6 +71,8 @@ indic-ocr-harness show-config                                       # the defaul
 - **Options.**
   - `Harness(config=..., model=<local snapshot dir>, device="cuda", dtype="bfloat16", loop_stop=True, cache="reads.json", num_threads=4)`
   - `h.read(image, layout=<layout record or JSON>)` reuses or corrects a layout.
+  - `Harness(solo_retry=True)` (CLI `--solo-retry`): a read that hits the token cap or loops inside a batch of
+    several crops is re-read alone, and kept if it ends normally. Batching can flip a near-tie into a loop.
   - `h.detect_layout(image)` returns the layout on its own.
 - **Configs.**
   - `HarnessConfig().replace(vote=None)` turns a component off.

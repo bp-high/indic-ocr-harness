@@ -73,3 +73,53 @@ def test_json_file_cache_round_trip(tmp_path):
 def test_dtype_validation():
     with pytest.raises(ValueError, match="dtype"):
         Recognizer(fake_runtime(), ReadCache(), dtype="int8")
+
+
+class BatchSensitive(ScriptedRecognizer):
+    """Crop 11 px wide 'loops' to the cap when decoded with other crops and reads cleanly alone (a near-tie flipped
+    by batching); every other crop reads the same either way."""
+
+    def _run(self, idx, items, keys, max_new, ban):
+        super()._run(idx, items, keys, max_new, ban)
+        for i in idx:
+            r = self.cache[keys[i]]
+            r["batch"] = len(idx)
+            if items[i][0].size[0] == 11 and len(idx) > 1:
+                r.update(text="<tr><th></th></tr>", hit=True, loop=True, ntok=max_new)
+
+
+def test_solo_retry_off_by_default_and_rescues_a_batched_loop():
+    imgs = [Image.new("RGB", (10 + i, 10)) for i in range(3)]
+    items = [(im, "p") for im in imgs]
+    off = BatchSensitive(lambda prompt, size, ban: f"read {size[0]}")
+    assert [o["hit"] for o in off.read(items)] == [False, True, False]  # unchanged behaviour without the flag
+    on = BatchSensitive(lambda prompt, size, ban: f"read {size[0]}", solo_retry=True)
+    out = on.read(items)
+    assert [o["text"] for o in out] == ["read 10", "read 11", "read 12"]
+    assert out[1]["solo_retry"] is True and not out[1]["hit"] and out[1]["batched_ntok"] == 2048
+    assert on.stats["solo_retries"] == 1 and on.stats["solo_kept"] == 1
+    batched_key = on.key(imgs[1], "p", 2048)
+    assert on.cache[batched_key]["hit"] is True  # the batched read stays in the cache under its own key
+    again = on.read(items)
+    assert again[1]["text"] == "read 11" and on.stats["solo_retries"] == 1  # the solo read is cached too
+
+
+def test_solo_retry_keeps_the_batched_read_when_alone_also_fails():
+    rec = BatchSensitive(lambda prompt, size, ban: "x", solo_retry=True)
+    real_run = rec._run
+
+    def always_loop(idx, items, keys, max_new, ban):
+        real_run(idx, items, keys, max_new, ban)
+        for i in idx:
+            rec.cache[keys[i]].update(hit=True, loop=True)
+
+    rec._run = always_loop
+    out = rec.read([(Image.new("RGB", (10, 10)), "p"), (Image.new("RGB", (12, 10)), "p")])
+    assert all(o["hit"] and o["solo_retry"] is False for o in out)
+    single = BatchSensitive(lambda prompt, size, ban: "x", solo_retry=True)
+    single._run = lambda idx, items, keys, max_new, ban: (
+        BatchSensitive._run(single, idx, items, keys, max_new, ban),
+        [single.cache[keys[i]].update(hit=True) for i in idx],
+    )
+    out1 = single.read([(Image.new("RGB", (10, 10)), "p")])
+    assert out1[0]["hit"] and "solo_retry" not in out1[0] and single.stats["solo_retries"] == 0  # already alone

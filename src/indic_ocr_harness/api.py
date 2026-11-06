@@ -49,6 +49,8 @@ class Harness:
         max_new_tokens: token cap per read (the model card's 2,048).
         num_threads: torch CPU threads (default: torch's own choice). Sets a process-wide torch setting.
         allow_compute: False raises ``CacheMissError`` instead of running the recognizer (cache-only runs).
+        solo_retry: re-read alone a read that hit the token cap or looped in a batch of several crops, and keep it if
+            it ends normally (off by default; see ``Recognizer``).
     """
 
     def __init__(
@@ -67,6 +69,7 @@ class Harness:
         max_new_tokens: int = 2048,
         num_threads: int | None = None,
         allow_compute: bool = True,
+        solo_retry: bool = False,
     ) -> None:
         self.config = HarnessConfig() if config is None else config
         snap = resolve_snapshot(
@@ -87,6 +90,7 @@ class Harness:
             max_new_tokens=max_new_tokens,
             loop_stop=loop_stop,
             allow_compute=allow_compute,
+            solo_retry=solo_retry,
         )
         self._layout_model: Any = None
         log.info("harness on %s (snapshot %s)", device, snap)
