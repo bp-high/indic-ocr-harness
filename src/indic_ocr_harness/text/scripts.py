@@ -13,6 +13,11 @@ import unicodedata
 SCRIPT_BASE = {"deva": 0x0900, "beng": 0x0980, "guru": 0x0A00, "gujr": 0x0A80, "orya": 0x0B00}
 """First code point of each supported script block."""
 
+NEUTRAL_MARKS = frozenset({0x0964, 0x0965})
+"""Danda and double danda. Unicode encodes them once, in the Devanagari block, for every Brahmic script; the
+0x80-offset positions in the other blocks (U+09E4, U+0AE4, ...) are unassigned. They are never mapped or counted as
+another script's letters."""
+
 DEVA_TO_ASCII_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
 # A Devanagari digit, except a ० right after a Devanagari letter: that is the abbreviation mark (मु०, न०).
@@ -37,7 +42,7 @@ def to_script(text: str, target: str = "deva") -> str:
     for c in text:
         o = ord(c)
         for b in SCRIPT_BASE.values():
-            if b != base and b <= o < b + 0x80:
+            if b != base and b <= o < b + 0x80 and o not in NEUTRAL_MARKS:
                 c = chr(o - b + base)
                 break
         out.append(c)
@@ -84,6 +89,8 @@ _ADDAK = re.compile("ੱ([ਕ-ਹਖ਼-ਫ਼])")  # addak doubles the next consonant
 
 
 def _other_block(o: int, base: int) -> int | None:
+    if o in NEUTRAL_MARKS:
+        return None
     for b in SCRIPT_BASE.values():
         if b != base and b <= o < b + 0x80:
             return b
@@ -160,7 +167,7 @@ def script_reread_plausible(first: str, reread: str, lo: float = 0.5, hi: float 
 def foreign_letters(text: str, target: str = "deva") -> tuple[int, int]:
     """(letters of other Indic scripts, all Indic letters) in ``text``; the dandas are shared by all scripts."""
     base = SCRIPT_BASE[target]
-    ind = [c for c in text if 0x0900 <= ord(c) < 0x0E00 and ord(c) not in (0x0964, 0x0965)]
+    ind = [c for c in text if 0x0900 <= ord(c) < 0x0E00 and ord(c) not in NEUTRAL_MARKS]
     return sum(1 for c in ind if not base <= ord(c) < base + 0x80), len(ind)
 
 
@@ -190,7 +197,7 @@ def ban_chars(part: str) -> set[str]:
         return {"$", "\\"}
     if part.startswith("script:"):
         base = SCRIPT_BASE[part.split(":", 1)[1]]
-        return {chr(o) for o in range(0x0900, 0x0E00) if not base <= o < base + 0x80 and o not in (0x0964, 0x0965)}
+        return {chr(o) for o in range(0x0900, 0x0E00) if not base <= o < base + 0x80 and o not in NEUTRAL_MARKS}
     if part == "digits:deva":
         return set("०१२३४५६७८९")
     if part == "digits:ascii":
