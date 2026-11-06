@@ -75,6 +75,16 @@ def test_map_script_fixes_non_parallel_code_points():
     assert map_script("बाजार", "beng") == "বাজার"
 
 
+def test_danda_is_shared_by_all_scripts():
+    # U+0964/0965 serve every Brahmic script; the 0x80-offset code points (U+09E4, U+0AE4, ...) are unassigned
+    for text, tgt in [("আবেদনপত্র। ঠিক॥", "beng"), ("પંચ નં। ૨॥", "gujr"), ("ਪੰਜਾਬ। ਹੈ॥", "guru"), ("ଶିକ୍ଷକ। ଅଛି॥", "orya")]:
+        assert map_script(text, tgt) == text
+        assert to_script(text, tgt) == text
+    assert map_script("রাম।", "deva") == to_script("রাম।", "deva") == "राम।"
+    assert to_script("राम।", "beng") == "রাম।"
+    assert map_script_spans("আবেদনপত্র।", [(0, 10)], "beng") == ("আবেদনপত্র।", [(0, 10)])
+
+
 def test_map_script_leaves_target_text_alone():
     t = "क\u093c केवल हिन्दी, 12"  # no letters of another script: returned as is (not even NFC-normalised)
     assert map_script(t) is t

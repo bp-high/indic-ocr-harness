@@ -11,7 +11,11 @@ The additions below change no read unless asked for:
   loop that ran to the cap (``hit`` and ``loop`` set, tail trimmed), so the harness's fallbacks run unchanged. It
   saves time only; the cache key does not include it;
 - ``score``: teacher-forced log-probs of candidate texts for a crop, so the recognizer can arbitrate between
-  readings.
+  readings;
+- ``solo_retry`` (off by default): a read decoded in a batch of several crops that hits the token cap or loops is
+  read again alone. Left padding and the batch's matrix shapes change the logits slightly, and on a near-tie that can
+  flip a read into a loop (a field form looped to the cap in a batch of 8 and read cleanly alone). The solo read is
+  kept only if it ends normally; it is cached under its own key, so the batched read stays in the cache.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ class Recognizer:
         max_new_tokens: the token cap of a read (the model card's 2,048).
         loop_stop: stop reads that are already looping (speed only).
         batch_size, batch_pixels: at most this many crops, and this many crop pixels, per generate() call.
+        solo_retry: re-read alone a batched read that hit the cap or looped; keep it if it ends normally.
         allow_compute: False makes a cache miss raise ``CacheMissError`` (cache-only runs, without the model).
     """
 
@@ -68,6 +73,7 @@ class Recognizer:
         batch_size: int = 8,
         batch_pixels: int = 5_000_000,
         allow_compute: bool = True,
+        solo_retry: bool = False,
     ) -> None:
         if dtype is not None and dtype not in DTYPES:
             raise ValueError(f"dtype must be one of {DTYPES} or None, got {dtype!r}")
@@ -79,12 +85,13 @@ class Recognizer:
         self.loop_stop = loop_stop
         self.batch_size, self.batch_pixels = batch_size, batch_pixels
         self.allow_compute = allow_compute
+        self.solo_retry = solo_retry
         self.tag = f"|{dtype}" if dtype else ""
         self._backend: Any = None
         self._bans: dict[str, Any] = {}
         self._vocab: list[str] | None = None
         self._special: set[int] = set()
-        self.stats = {"reads": 0, "cached": 0, "tokens": 0, "seconds": 0.0}
+        self.stats = {"reads": 0, "cached": 0, "tokens": 0, "seconds": 0.0, "solo_retries": 0, "solo_kept": 0}
 
     # -- model ----------------------------------------------------------------------------------------------- #
     @property
@@ -163,7 +170,29 @@ class Recognizer:
                 chunk.append(i)
         self.stats["reads"] += len(items)
         self.stats["cached"] += len(items) - len(todo)
-        return [dict(self.cache[k], cached=(i not in todo)) for i, k in enumerate(keys)]
+        out = [dict(self.cache[k], cached=(i not in todo)) for i, k in enumerate(keys)]
+        if self.solo_retry:
+            self._solo_retry(items, keys, budgets, bans, out)
+        return out
+
+    def _solo_retry(
+        self, items: Sequence[tuple[Image, str]], keys: list[str], budgets: list[int], bans: list[str | None], out: list[Record]
+    ) -> None:
+        """Re-read alone every read that hit the cap or looped in a batch of several crops; keep the solo read if it
+        ends normally. Records without a ``batch`` field (older caches) count as batched."""
+        solo = [hashlib.sha1((k + "|solo").encode()).hexdigest() for k in keys]
+        for i, r in enumerate(out):
+            if not r["hit"] or r.get("batch", 2) < 2:
+                continue
+            if solo[i] not in self.cache:
+                self.stats["solo_retries"] += 1
+                self._run([i], items, solo, budgets[i], bans[i])
+            s = self.cache[solo[i]]
+            if not s["hit"]:
+                self.stats["solo_kept"] += 1
+                out[i] = dict(s, cached=r["cached"], solo_retry=True, batched_ntok=r["ntok"])
+            else:
+                out[i]["solo_retry"] = False
 
     def _run(self, idx: list[int], items: Sequence[tuple[Image, str]], keys: list[str], max_new: int, ban: str | None) -> None:
         rec = self.backend
@@ -263,6 +292,7 @@ class Recognizer:
                 "tlp": [round(float(x), 3) for x in lp],
                 "tmargin": [round(float(x), 3) for x in mgs[r, :n]],
                 "tent": [round(float(x), 3) for x in ents[r, :n]],
+                "batch": len(idx),
             }
             if r in stops:
                 entry["stopped_at"] = stops[r]

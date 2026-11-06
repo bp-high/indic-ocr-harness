@@ -25,6 +25,19 @@ another Indic script give the same output as 0.1.0.
   - The recognizer still chooses between the re-read and the letter map.
   - No extra reads: only a scoring pass for each re-read now kept.
 - Set both fields to False for the 0.1.0 behaviour.
+- **Fixed: the danda on non-Devanagari pages.**
+  - Unicode encodes ।/॥ (U+0964/0965) once, in the Devanagari block, for every Brahmic script.
+  - With `script` set to `beng`, `guru`, `gujr` or `orya`, `to_script` and `map_script` moved them to the unassigned
+    code points 0x80 further on (U+09E4/09E5, U+0A64/0A65, U+0AE4/0AE5, U+0B64/0B65). That corrupted every sentence
+    end on those pages.
+  - The dandas are now left as written (`text.scripts.NEUTRAL_MARKS`).
+  - Devanagari pages are unaffected. The foreign-letter gate and the script bans already treated the dandas as shared.
+- **New decoder option `solo_retry`** (off by default; `Harness(solo_retry=True)`, `--solo-retry`).
+  - A read decoded in a batch of several crops that hits the token cap or loops is read again on its own, and kept
+    if it ends normally.
+  - Left padding and the batch's matrix shapes shift the logits slightly. On a near-tie that can flip a read into a
+    loop: a filled-in ledger form looped to the cap in a batch of 8 and read cleanly alone.
+  - The solo read is cached under its own key. With the option off, every read is unchanged.
 
 ## 0.1.0 (2026-10-21)
 

@@ -38,6 +38,7 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--device", default="cpu")
     r.add_argument("--dtype", default="float32", choices=[*DTYPES, "checkpoint"], help="recognizer dtype (default float32)")
     r.add_argument("--no-loop-stop", action="store_true", help="let looping reads run to the token cap")
+    r.add_argument("--solo-retry", action="store_true", help="re-read alone a batched read that hit the token cap or looped")
     r.add_argument("--threads", type=int, default=None, help="torch CPU threads")
     r.add_argument("--cache", type=Path, default=None, help="read cache (.json); makes runs resumable")
     out = r.add_mutually_exclusive_group()
@@ -92,6 +93,7 @@ def _cmd_read(args: argparse.Namespace) -> int:
         device=args.device,
         dtype=None if args.dtype == "checkpoint" else args.dtype,
         loop_stop=not args.no_loop_stop,
+        solo_retry=args.solo_retry,
         cache=args.cache,
         num_threads=args.threads,
     ) as h:
